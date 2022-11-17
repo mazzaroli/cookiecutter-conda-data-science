@@ -23,7 +23,10 @@ class MissingMethods:
     def number_complete(self) -> int:
         return self._obj.size - self._obj.missing.number_missing()
 
-    def proportion_missing(self):
+    def value_counts(self) -> pd.Series:
+        return self._obj.isna().sum()
+
+    def proportion(self) -> pd.Series:
         return self._obj.isna().mean().mul(100)
 
     def missing_variable_summary(self) -> pd.DataFrame:
