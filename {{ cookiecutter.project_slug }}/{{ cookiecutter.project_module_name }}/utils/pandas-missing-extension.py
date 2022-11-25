@@ -1,11 +1,12 @@
-import itertools
-import pandas as pd
-import upsetplot
 import janitor
+import itertools
+from typing import List
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
+import upsetplot
+from statsmodels.graphics.mosaicplot import mosaic
 
 try:
     del pd.DataFrame.missing
@@ -17,17 +18,17 @@ class MissingMethods:
     def __init__(self, pandas_obj):
         self._obj = pandas_obj
 
-    def number_missing(self) -> int:
-        return self._obj.isna().sum().sum()
-
-    def number_complete(self) -> int:
-        return self._obj.size - self._obj.missing.number_missing()
-
     def value_counts(self) -> pd.Series:
         return self._obj.isna().sum()
 
     def proportion(self) -> pd.Series:
         return self._obj.isna().mean().mul(100)
+
+    def number_missing(self) -> int:
+        return self._obj.isna().sum().sum()
+
+    def number_complete(self) -> int:
+        return self._obj.size - self._obj.missing.number_missing()
 
     def missing_variable_summary(self) -> pd.DataFrame:
         return self._obj.isnull().pipe(
@@ -96,22 +97,17 @@ class MissingMethods:
 
     def missing_variable_run(self, variable) -> pd.DataFrame:
         rle_list = self._obj[variable].pipe(
-            lambda s: [[len(list(g)), k] for k, g in itertools.groupby(s.isnull())]
+            lambda s: [[len(List(g)), k] for k, g in itertools.groupby(s.isnull())]
         )
 
         return pd.DataFrame(data=rle_list, columns=["run_length", "is_na"]).replace(
             {False: "complete", True: "missing"}
         )
 
-    def sort_variables_by_missingness(self, ascending = False):
+    def sort_variables_by_missingness(self, ascending=False):
 
-        return (
-            self._obj
-            .pipe(
-                lambda df: (
-                    df[df.isna().sum().sort_values(ascending = ascending).index]
-                )
-            )
+        return self._obj.pipe(
+            lambda df: (df[df.isna().sum().sort_values(ascending=ascending).index])
         )
 
     def create_shadow_matrix(
@@ -119,13 +115,13 @@ class MissingMethods:
         true_string: str = "Missing",
         false_string: str = "Not Missing",
         only_missing: bool = False,
+        suffix: str = "_NA",
     ) -> pd.DataFrame:
         return (
-            self._obj
-            .isna()
+            self._obj.isna()
             .pipe(lambda df: df[df.columns[df.any()]] if only_missing else df)
             .replace({False: false_string, True: true_string})
-            .add_suffix("_NA")
+            .add_suffix(suffix)
         )
 
     def bind_shadow_matrix(
@@ -133,6 +129,7 @@ class MissingMethods:
         true_string: str = "Missing",
         false_string: str = "Not Missing",
         only_missing: bool = False,
+        suffix: str = "_NA",
     ) -> pd.DataFrame:
         return pd.concat(
             objs=[
@@ -140,10 +137,11 @@ class MissingMethods:
                 self._obj.missing.create_shadow_matrix(
                     true_string=true_string,
                     false_string=false_string,
-                    only_missing=only_missing
-                )
+                    only_missing=only_missing,
+                    suffix=suffix,
+                ),
             ],
-            axis="columns"
+            axis="columns",
         )
 
     def missing_scan_count(self, search) -> pd.DataFrame:
@@ -154,6 +152,8 @@ class MissingMethods:
             .rename(columns={"index": "variable", 0: "n"})
             .assign(original_type=self._obj.dtypes.reset_index()[0])
         )
+
+    # Plotting functions ---
 
     def missing_variable_plot(self):
         df = self._obj.missing.missing_variable_summary().sort_values("n_missing")
@@ -210,7 +210,7 @@ class MissingMethods:
         plt.margins(0)
         plt.tight_layout(pad=0)
 
-    def missing_upsetplot(self, variables: list[str] = None, **kwargs):
+    def missing_upsetplot(self, variables: List[str] = None, **kwargs):
 
         if variables is None:
             variables = self._obj.columns.tolist()
@@ -221,12 +221,33 @@ class MissingMethods:
             .pipe(lambda df: upsetplot.plot(df, **kwargs))
         )
 
-@pd.api.extensions.register_dataframe_accessor("viz")
-class Visualization:
-    def __init__(self, pandas_obj):
-        self._obj = pandas_obj
+    def scatter_imputation_plot(
+        self, x, y, imputation_suffix="_imp", show_marginal=False, **kwargs
+    ):
 
-    def multiple_viz_inputations(self, variables: list[str] = None, **kwargs):
+        x_imputed = f"{ x }{ imputation_suffix }"
+        y_imputed = f"{ y }{ imputation_suffix }"
+
+        plot_func = sns.scatterplot if not show_marginal else sns.jointplot
+
+        return (
+            self._obj[[x, y, x_imputed, y_imputed]]
+            .assign(is_imputed=lambda df: df[x_imputed] | df[y_imputed])
+            .pipe(lambda df: (plot_func(data=df, x=x, y=y, hue="is_imputed", **kwargs)))
+        )
+
+    def missing_upsetplot(self, variables: List[str] = None, **kwargs):
+
+        if variables is None:
+            variables = self._obj.columns.tolist()
+
+        return (
+            self._obj.isna()
+            .value_counts(variables)
+            .pipe(lambda df: upsetplot.plot(df, **kwargs))
+        )
+
+    def multiple_viz_inputations_plot(self, variables: List[str] = None, **kwargs):
         return (
             self._obj
             .select_columns(variables)
